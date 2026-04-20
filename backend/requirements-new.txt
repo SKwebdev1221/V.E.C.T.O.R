@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+scikit-learn
+pandas
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
+python-dotenv
+pydantic-settings
+python-multipart
+dotenv
