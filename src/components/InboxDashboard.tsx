@@ -15,8 +15,8 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { classifyEmail, type ClassificationResult } from "@/lib/spamClassifier";
 import {
-  fetchInitialEmails,
-  subscribeToNewEmails,
+  getStoredEmails,
+  deleteStoredEmail,
   type RawEmail,
 } from "@/lib/mockEmails";
 import { cn } from "@/lib/utils";
@@ -31,8 +31,8 @@ interface ClassifiedEmail extends RawEmail {
   overridden: boolean;
 }
 
-function classify(email: RawEmail): ClassifiedEmail {
-  const c = classifyEmail(`${email.subject}\n${email.body}`);
+async function classify(email: RawEmail): Promise<ClassifiedEmail> {
+  const c = await classifyEmail(`${email.subject}\n${email.body}`);
   return { ...email, classification: c, label: c.label, overridden: false };
 }
 
@@ -50,28 +50,23 @@ const InboxDashboard = () => {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<FilterMode>("all");
   const [sort, setSort] = useState<SortMode>("date_desc");
+  const [loading, setLoading] = useState(true);
 
-  // Initial load
+  // Initial load & Event listener
   useEffect(() => {
-    const initial = fetchInitialEmails().map(classify);
-    setEmails(initial);
-    setSelectedId(initial[0]?.id ?? null);
-  }, []);
+    async function load() {
+      setLoading(true);
+      const raw = getStoredEmails();
+      const classified = await Promise.all(raw.map(classify));
+      setEmails(classified);
+      setSelectedId(classified[0]?.id ?? null);
+      setLoading(false);
+    }
+    load();
 
-  // Real-time stream
-  useEffect(() => {
-    const unsub = subscribeToNewEmails((raw) => {
-      const c = classify(raw);
-      setEmails((prev) => [c, ...prev]);
-      if (c.label === "SPAM") {
-        toast.error(`🚨 New spam detected from ${c.sender}`, {
-          description: c.subject,
-        });
-      } else {
-        toast(`📬 New email from ${c.sender}`, { description: c.subject });
-      }
-    });
-    return unsub;
+    const onUpdate = () => load();
+    window.addEventListener("emails_updated", onUpdate);
+    return () => window.removeEventListener("emails_updated", onUpdate);
   }, []);
 
   const stats = useMemo(() => {
@@ -117,15 +112,19 @@ const InboxDashboard = () => {
   };
 
   const deleteEmail = (id: string) => {
+    deleteStoredEmail(id);
     setEmails((prev) => prev.filter((e) => e.id !== id));
     if (selectedId === id) setSelectedId(null);
   };
 
-  const refresh = () => {
-    const fresh = fetchInitialEmails().map(classify);
+  const refresh = async () => {
+    setLoading(true);
+    const raw = getStoredEmails();
+    const fresh = await Promise.all(raw.map(classify));
     setEmails(fresh);
     setSelectedId(fresh[0]?.id ?? null);
     toast("Inbox refreshed");
+    setLoading(false);
   };
 
   return (
@@ -194,9 +193,10 @@ const InboxDashboard = () => {
             variant="outline"
             size="sm"
             onClick={refresh}
+            disabled={loading}
             className="border-primary/30 text-primary hover:bg-primary/10"
           >
-            <RefreshCw className="w-3 h-3 mr-1" /> Refresh
+            <RefreshCw className={cn("w-3 h-3 mr-1", loading && "animate-spin")} /> Refresh
           </Button>
         </div>
       </div>
@@ -205,8 +205,13 @@ const InboxDashboard = () => {
       <div className="grid lg:grid-cols-5 gap-4">
         {/* Email list */}
         <div className="lg:col-span-2 rounded border border-primary/20 bg-card/40 backdrop-blur overflow-hidden">
-          <div className="max-h-[640px] overflow-y-auto divide-y divide-border">
-            {visible.length === 0 && (
+          <div className="max-h-[640px] overflow-y-auto divide-y divide-border relative">
+            {loading && (
+              <div className="absolute inset-0 bg-background/50 backdrop-blur-sm flex items-center justify-center z-10">
+                <RefreshCw className="w-6 h-6 text-primary animate-spin" />
+              </div>
+            )}
+            {!loading && visible.length === 0 && (
               <div className="p-8 text-center text-sm text-muted-foreground">
                 No emails match your filters.
               </div>
@@ -274,8 +279,12 @@ const InboxDashboard = () => {
         <div className="lg:col-span-3 rounded border border-primary/20 bg-card/40 backdrop-blur p-5 min-h-[400px]">
           {!selected ? (
             <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
-              <Mail className="w-10 h-10 mb-3 opacity-50" />
-              <p className="text-sm">Select an email to preview</p>
+              {loading ? (
+                <RefreshCw className="w-10 h-10 mb-3 opacity-50 animate-spin" />
+              ) : (
+                <Mail className="w-10 h-10 mb-3 opacity-50" />
+              )}
+              <p className="text-sm">{loading ? "Classifying emails via API..." : "Select an email to preview"}</p>
             </div>
           ) : (
             <article>
@@ -320,37 +329,8 @@ const InboxDashboard = () => {
                 {selected.body}
               </p>
 
-              {/* Top features */}
-              <div className="rounded bg-background/60 border border-border p-3 mb-5">
-                <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2">
-                  Why this verdict
-                </div>
-                <ul className="space-y-1">
-                  {selected.classification.features
-                    .slice()
-                    .sort((a, b) => b.value * b.weight - a.value * a.weight)
-                    .slice(0, 3)
-                    .map((f) => (
-                      <li
-                        key={f.name}
-                        className="flex justify-between text-xs gap-2"
-                      >
-                        <span
-                          className={cn(
-                            f.triggered ? "text-destructive" : "text-foreground",
-                          )}
-                        >
-                          {f.triggered ? "▶ " : "· "}
-                          {f.name}
-                        </span>
-                        <span className="text-muted-foreground">{f.description}</span>
-                      </li>
-                    ))}
-                </ul>
-              </div>
-
               {/* Actions */}
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2 mt-auto">
                 {selected.label === "SPAM" ? (
                   <Button
                     onClick={() => overrideLabel(selected.id, "LEGITIMATE")}

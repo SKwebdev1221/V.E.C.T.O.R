@@ -1,35 +1,53 @@
-from fastapi import FastAPI, HTTPException, Depends
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBearer
-from pydantic import BaseModel
-from typing import List
-import pickle
 import os
-from dotenv import load_dotenv  
+import re
 import asyncio
+from typing import List
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+import tensorflow as tf
 
 load_dotenv()
 
-from gmail.gmail_fetch import get_emails
+# Note: The gmail module is missing from the project, so we comment it out for now.
+# from gmail.gmail_fetch import get_emails
 
-app = FastAPI(title="V.E.C.T.O.R Spam Classifier", version="1.0.0")
+app = FastAPI(title="V.E.C.T.O.R Spam Classifier", version="2.0.0")
 
 # CORS for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("BACKEND_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(","),
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Load models with error handling
+# Text preprocessing (must match training)
+def clean_text(text: str) -> str:
+    if not text:
+        return ""
+    text = text.lower()
+    text = re.sub(r'http\S+|www\S+|https\S+', '', text, flags=re.MULTILINE)
+    text = re.sub(r'\S+@\S+', '', text)
+    text = re.sub(r'<.*?>', '', text)
+    text = re.sub(r'[^a-zA-Z\s]', ' ', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
+# Load DL model with error handling
+MODEL_PATH = os.getenv("MODEL_PATH", "backend/model/spam_model.keras")
+model = None
 try:
-    model = pickle.load(open(os.getenv("MODEL_PATH", "model/spam_model.pkl"), "rb"))
-    tfidf = pickle.load(open(os.getenv("TFIDF_PATH", "model/tfidf.pkl"), "rb"))
-except FileNotFoundError:
+    if os.path.exists(MODEL_PATH):
+        model = tf.keras.models.load_model(MODEL_PATH)
+        print(f"✅ Loaded DL model from {MODEL_PATH}")
+    else:
+        print(f"⚠️ Model file not found at {MODEL_PATH}")
+except Exception as e:
+    print(f"❌ Error loading model: {e}")
     model = None
-    tfidf = None
 
 class TextInput(BaseModel):
     text: str
@@ -39,50 +57,51 @@ class TextInput(BaseModel):
 # =========================================
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "models_loaded": model is not None}
+    return {"status": "healthy", "model_loaded": model is not None}
 
 # =========================================
 # API 1: Fetch & Classify Emails from Gmail
 # =========================================
-@app.get("/emails", response_model=List[dict])
-async def emails():
-    if not os.path.exists(os.getenv("GMAIL_TOKEN_PATH", "gmail/token.json")):
-        raise HTTPException(status_code=401, detail="Gmail token missing. Run /auth/gmail first.")
-    
-    emails_list = await asyncio.to_thread(get_emails)
-    
-    results = []
-    if model and tfidf:
-        for mail in emails_list:
-            vec = tfidf.transform([mail])
-            pred = model.predict(vec)[0]
-            results.append({
-                "text": mail,
-                "prediction": "Spam" if pred == 1 else "Not Spam",
-                "confidence": float(model.predict_proba(vec)[0].max())
-            })
-    else:
-        results = [{"text": mail, "prediction": "Models not loaded", "confidence": 0.0} for mail in emails_list]
-    
-    return results
+# @app.get("/emails", response_model=List[dict])
+# async def emails():
+#     if not os.path.exists(os.getenv("GMAIL_TOKEN_PATH", "backend/gmail/token.json")):
+#         raise HTTPException(status_code=401, detail="Gmail token missing. Run /auth/gmail first.")
+#
+#     # emails_list = await asyncio.to_thread(get_emails)
+#     emails_list = [] # Mocked since get_emails is missing
+#
+#     results = []
+#     if model:
+#         for mail in emails_list:
+#             cleaned = clean_text(mail)
+#             pred_prob = float(model.predict([cleaned], verbose=0)[0][0])
+#             pred_label = "Spam" if pred_prob >= 0.5 else "Not Spam"
+#             results.append({
+#                 "text": mail,
+#                 "prediction": pred_label,
+#                 "confidence": round(max(pred_prob, 1 - pred_prob), 4)
+#             })
+#     else:
+#         results = [{"text": mail, "prediction": "Model not loaded", "confidence": 0.0} for mail in emails_list]
+#
+#     return results
 
 # =========================================
 # API 2: Classify Single Email
 # =========================================
 @app.post("/classify", response_model=dict)
 async def classify(input: TextInput):
-    if not model or not tfidf:
-        raise HTTPException(status_code=500, detail="Models not loaded. Run python train.py")
-    
-    vec = tfidf.transform([input.text])
-    pred = model.predict(vec)[0]
-    probs = model.predict_proba(vec)[0]
-    
+    if not model:
+        raise HTTPException(status_code=500, detail="DL model not loaded. Run python backend/train.py first.")
+
+    cleaned = clean_text(input.text)
+    pred_prob = float(model.predict(tf.constant([cleaned]), verbose=0)[0][0])
+    pred_label = "Spam" if pred_prob >= 0.5 else "Not Spam"
+
     return {
-        "text": input.text,
-        "prediction": "Spam" if pred == 1 else "Not Spam",
-        "confidence": float(probs.max()),
-        "probabilities": {"spam": float(probs[1]), "ham": float(probs[0])}
+        "score": round(pred_prob, 4),
+        "label": pred_label,
+        "confidence": round(max(pred_prob, 1 - pred_prob), 4)
     }
 
 # =========================================
@@ -90,10 +109,8 @@ async def classify(input: TextInput):
 # =========================================
 @app.get("/auth/gmail/status")
 async def gmail_status():
-    token_path = os.getenv("GMAIL_TOKEN_PATH", "gmail/token.json")
+    token_path = os.getenv("GMAIL_TOKEN_PATH", "backend/gmail/token.json")
     return {"token_exists": os.path.exists(token_path)}
-
-# Note: Full OAuth flow needs frontend redirect (credentials.json for quickstart)
 
 if __name__ == "__main__":
     import uvicorn

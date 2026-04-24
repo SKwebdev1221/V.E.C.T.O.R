@@ -1,21 +1,6 @@
 import pandas as pd
-import tensorflow as tf
-from sklearn.model_selection import train_test_split
-import os
-
-# Ensure model directory exists
-os.makedirs("model", exist_ok=True)
-
-print("Loading dataset...")
-# Load dataset
-df = pd.read_csv(r"D:\Users\Sahil V Kesarkar\V.E.C.T.O.R\backend\data\enron_spam_data.csv")
-
 import random
 
-# Preprocess
-# Combine Subject and Message for better context. Replace NaNs with empty strings.
-
-print("Injecting synthetic modern dataset for better real-world performance...")
 modern_spam = [
     'URGENT: Your account has been suspended. Click here to verify your identity.',
     'You have won a $1000 gift card! Claim your prize now at this link.',
@@ -32,8 +17,7 @@ modern_spam = [
     'Your bank account is locked. Verify your information to unlock it.',
     'Claim your free trial of our premium service. Sign up today!',
     'We have a special promotion just for you! Do not miss out.',
-    'Internshala job offer. Check out our curated list for you. Remote Immediately Competitive salary No experience required',
-    'Assistant Channel Manager DTDC Express Limited Remote Immediately Competitive salary No experience required 3 weeks ago JobApply now'
+    'Internshala job offer. Check out our curated list for you. Remote Immediately Competitive salary No experience required'
 ]
 
 modern_ham = [
@@ -62,76 +46,8 @@ for _ in range(500):
     for ham_msg in modern_ham:
         data.append({'Message ID': random.randint(100000, 999999), 'Subject': 'Ham', 'Message': ham_msg, 'Spam/Ham': 'ham', 'Date': '2026-04-24'})
 
-df = pd.concat([df, pd.DataFrame(data)], ignore_index=True)
-df['Subject'] = df['Subject'].fillna('')
-df['Message'] = df['Message'].fillna('')
-df['text'] = df['Subject'] + " " + df['Message']
-
-# Map labels: spam=1, ham=0
-df = df.dropna(subset=['Spam/Ham'])
-df['label'] = df['Spam/Ham'].map({'spam': 1, 'ham': 0})
-
-X = df['text'].astype(str)
-y = df['label'].astype(int)
-
-# Split
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42
-)
-
-batch_size = 32
-
-train_dataset = tf.data.Dataset.from_tensor_slices((X_train.tolist(), y_train.tolist())).batch(batch_size)
-test_dataset = tf.data.Dataset.from_tensor_slices((X_test.tolist(), y_test.tolist())).batch(batch_size)
-
-print(f"Training on {len(X_train)} samples, validating on {len(X_test)} samples.")
-
-# 1. Create TextVectorization layer
-max_vocab_size = 10000
-max_sequence_length = 250
-
-vectorize_layer = tf.keras.layers.TextVectorization(
-    max_tokens=max_vocab_size,
-    output_mode='int',
-    output_sequence_length=max_sequence_length
-)
-
-print("Adapting vectorization layer to training data (this may take a moment)...")
-vectorize_layer.adapt(X_train.tolist())
-
-# 2. Build the Model
-embedding_dim = 32
-
-model = tf.keras.Sequential([
-    tf.keras.Input(shape=(1,), dtype=tf.string),
-    vectorize_layer,
-    tf.keras.layers.Embedding(input_dim=max_vocab_size, output_dim=embedding_dim),
-    tf.keras.layers.GlobalAveragePooling1D(),
-    tf.keras.layers.Dense(16, activation='relu'),
-    tf.keras.layers.Dropout(0.2),
-    tf.keras.layers.Dense(1, activation='sigmoid')
-])
-
-model.compile(
-    loss='binary_crossentropy',
-    optimizer='adam',
-    metrics=['accuracy']
-)
-
-model.summary()
-
-# 3. Train the Model
-print("Starting training...")
-epochs = 5
-
-history = model.fit(
-    train_dataset,
-    validation_data=test_dataset,
-    epochs=epochs
-)
-
-# 4. Save the Model
-model_path = "model/spam_model.keras"
-model.save(model_path)
-
-print(f"Deep Learning model trained and saved successfully at {model_path}!")
+new_df = pd.DataFrame(data)
+df = pd.read_csv('backend/data/enron_spam_data.csv')
+df = pd.concat([df, new_df], ignore_index=True)
+df.to_csv('backend/data/enron_spam_data.csv', index=False)
+print('Synthesized dataset appended. Total rows:', len(df))

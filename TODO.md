@@ -1,27 +1,19 @@
-# V.E.C.T.O.R Progress Tracker
+# Spam Email Detector DL Model - Task Plan
 
-✅ **Core Cleanup Complete**
+## Goal
 
-- Deleted duplicates (UI components)
-- Fixed vire-env.d.ts
-- Fixed tailwind.config.ts (cleaned content paths)
+Build a nice spam email detector using text embeddings and feature extraction DL model, trained on Enron spam data (`backend/data/enron_spam_data.csv`). Model code in `backend/train.py`, backend API in `backend/app.py`.
 
-✅ **App Fully Functional**
+## Steps
 
-- Real-time inbox w/ ML spam classifier
-- Interactive demo + visualizations
-- Dev server: http://localhost:8080/
+- [x] Step 1: Rewrite `backend/train.py` with robust DL model (Embedding + Conv1D + BiLSTM + Dense).
+- [x] Step 2: Update `backend/app.py` to load and use the new Keras model instead of sklearn pickles.
+- [x] Step 3: Update `backend/requirements-new.txt` to ensure all DL dependencies are present.
+- [x] Step 4: Test training script execution (optional, depending on environment).
 
-**Tailwind Config Fixed** ↓
+## Information Gathered
 
-## Quick Test:
-
-```
-cd V.E.C.T.O.R && npm run dev
-```
-
-- Classify spam samples
-- Filter inbox by spam/legit
-- Override labels
-
-**Ready for Production!** 🚀
+- Dataset: `backend/data/enron_spam_data.csv` has columns `Unnamed: 0`, `Subject`, `Message`, `Spam/Ham`, `Date`.
+- Current `train.py` has a very basic TF model (Embedding + GlobalAveragePooling1D).
+- Current `app.py` still uses old sklearn pickle models (`spam_model.pkl`, `tfidf.pkl`).
+- Requirements already include `tensorflow`, but app needs alignment.
